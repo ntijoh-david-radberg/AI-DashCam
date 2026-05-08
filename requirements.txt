@@ -1,0 +1,7 @@
+flask
+ultralytics
+easyocr
+opencv-python
+picamera2
+pillow
+numpy

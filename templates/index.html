@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <title>AI DashCam</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+    <h1>AI DashCam</h1>
+    <p>Live registreringsskylt-igenkänning med YOLOv11 och EasyOCR</p>
+</header>
+
+<main class="container">
+
+    <section class="card video-card">
+        <h2>Livekamera</h2>
+        <img class="video" src="/video_feed" alt="Live video">
+    </section>
+
+    <section class="card info-card">
+        <h2>Senaste registreringsskylt</h2>
+
+        <div id="plate" class="plate">Laddar...</div>
+
+        <p>
+            Säkerhet:
+            <span id="confidence">0</span>%
+        </p>
+
+        <p>
+            Senast sedd:
+            <span id="time">Aldrig</span>
+        </p>
+
+        <h3>Utklippt skylt</h3>
+        <img id="plateImage" class="plate-image" src="/static/latest_plate.jpg" alt="Senaste skylt">
+
+        <a id="bilLink" class="button" href="#" target="_blank">
+            Sök på Biluppgifter
+        </a>
+    </section>
+
+</main>
+
+<script>
+    async function updatePlateData() {
+        try {
+            const response = await fetch("/plate_data");
+            const data = await response.json();
+
+            document.getElementById("plate").textContent = data.plate;
+            document.getElementById("confidence").textContent = data.confidence;
+            document.getElementById("time").textContent = data.time;
+
+            if (data.plate !== "Ingen skylt hittad") {
+                document.getElementById("plateImage").src = data.image + "?t=" + new Date().getTime();
+                document.getElementById("bilLink").href = data.biluppgifter_url;
+                document.getElementById("bilLink").style.display = "inline-block";
+            } else {
+                document.getElementById("bilLink").style.display = "none";
+            }
+
+        } catch (error) {
+            console.log("Kunde inte hämta skyltdata:", error);
+        }
+    }
+
+    setInterval(updatePlateData, 1000);
+    updatePlateData();
+</script>
+
+</body>
+</html>
