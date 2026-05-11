@@ -16,6 +16,9 @@ latest_confidence = 0
 latest_time = "Aldrig"
 latest_image_path = "static/latest_plate.jpg"
 
+frame_count = 0
+last_ocr_time = 0
+
 os.makedirs("static", exist_ok=True)
 
 model = YOLO(MODEL_PATH)
@@ -46,6 +49,8 @@ def clean_plate_text(text):
 
 def read_plate_text(plate_img):
     gray = cv2.cvtColor(plate_img, cv2.COLOR_RGB2GRAY)
+
+    # Gör bara själva skylten större, inte hela kamerabilden
     gray = cv2.resize(gray, None, fx=2, fy=2)
 
     results = reader.readtext(gray)
@@ -62,11 +67,18 @@ def read_plate_text(plate_img):
 
 def generate_frames():
     global latest_plate, latest_confidence, latest_time
+    global frame_count, last_ocr_time
 
     while True:
+        frame_count += 1
+
+        # Originalbild från kameran i 1280x720
         frame = picam2.capture_array()
 
-        results = model(frame, conf=0.5, verbose=False)
+        # Liten kopia för YOLO, så detection blir snabbare
+        small_frame = cv2.resize(frame, (640, 360))
+
+        results = model(small_frame, conf=0.5, verbose=False)
 
         for result in results:
             for box in result.boxes:
@@ -74,14 +86,42 @@ def generate_frames():
 
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
 
+                # Räkna om koordinaterna från lilla bilden till originalbilden
+                scale_x = frame.shape[1] / small_frame.shape[1]
+                scale_y = frame.shape[0] / small_frame.shape[0]
+
+                x1 = int(x1 * scale_x)
+                y1 = int(y1 * scale_y)
+                x2 = int(x2 * scale_x)
+                y2 = int(y2 * scale_y)
+
+                # Säkerhet så koordinaterna inte går utanför bilden
+                x1 = max(0, x1)
+                y1 = max(0, y1)
+                x2 = min(frame.shape[1], x2)
+                y2 = min(frame.shape[0], y2)
+
                 plate_img = frame[y1:y2, x1:x2]
 
                 if plate_img.size == 0:
                     continue
 
-                reg_number = read_plate_text(plate_img)
+                reg_number = None
 
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                # Kör OCR max ungefär en gång per sekund
+                current_time = time.time()
+
+                if current_time - last_ocr_time > 1.0:
+                    reg_number = read_plate_text(plate_img)
+                    last_ocr_time = current_time
+
+                cv2.rectangle(
+                    frame,
+                    (x1, y1),
+                    (x2, y2),
+                    (0, 255, 0),
+                    2
+                )
 
                 label = "REG SKYLT"
 
@@ -90,7 +130,10 @@ def generate_frames():
                     latest_confidence = round(confidence * 100, 1)
                     latest_time = time.strftime("%H:%M:%S")
 
-                    cv2.imwrite(latest_image_path, cv2.cvtColor(plate_img, cv2.COLOR_RGB2BGR))
+                    cv2.imwrite(
+                        latest_image_path,
+                        cv2.cvtColor(plate_img, cv2.COLOR_RGB2BGR)
+                    )
 
                     label = f"{reg_number} ({latest_confidence}%)"
 
@@ -101,11 +144,13 @@ def generate_frames():
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.8,
                     (0, 255, 0),
-                    2,
+                    2
                 )
 
-        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-        success, buffer = cv2.imencode(".jpg", frame)
+        # Visar fortfarande originalbilden i 1280x720 på hemsidan
+        display_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
+        success, buffer = cv2.imencode(".jpg", display_frame)
 
         if not success:
             continue
