@@ -16,8 +16,8 @@ latest_confidence = 0
 latest_time = "Aldrig"
 latest_image_path = "static/latest_plate.jpg"
 
-frame_count = 0
-last_ocr_time = 0
+last_plate_signature = None
+last_ocr_result = None
 
 os.makedirs("static", exist_ok=True)
 
@@ -50,7 +50,6 @@ def clean_plate_text(text):
 def read_plate_text(plate_img):
     gray = cv2.cvtColor(plate_img, cv2.COLOR_RGB2GRAY)
 
-    # Gör bara själva skylten större, inte hela kamerabilden
     gray = cv2.resize(gray, None, fx=2, fy=2)
 
     results = reader.readtext(gray)
@@ -65,17 +64,26 @@ def read_plate_text(plate_img):
     return None
 
 
+def get_plate_signature(x1, y1, x2, y2):
+    """
+    Gör koordinaterna lite grövre så små skakningar i bilden
+    inte räknas som en helt ny skylt.
+    """
+    rounded_x1 = round(x1 / 40)
+    rounded_y1 = round(y1 / 40)
+    rounded_x2 = round(x2 / 40)
+    rounded_y2 = round(y2 / 40)
+
+    return f"{rounded_x1}_{rounded_y1}_{rounded_x2}_{rounded_y2}"
+
+
 def generate_frames():
     global latest_plate, latest_confidence, latest_time
-    global frame_count, last_ocr_time
+    global last_plate_signature, last_ocr_result
 
     while True:
-        frame_count += 1
-
-        # Originalbild från kameran i 1280x720
         frame = picam2.capture_array()
 
-        # Liten kopia för YOLO, så detection blir snabbare
         small_frame = cv2.resize(frame, (640, 360))
 
         results = model(small_frame, conf=0.5, verbose=False)
@@ -86,7 +94,6 @@ def generate_frames():
 
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
 
-                # Räkna om koordinaterna från lilla bilden till originalbilden
                 scale_x = frame.shape[1] / small_frame.shape[1]
                 scale_y = frame.shape[0] / small_frame.shape[0]
 
@@ -95,7 +102,6 @@ def generate_frames():
                 x2 = int(x2 * scale_x)
                 y2 = int(y2 * scale_y)
 
-                # Säkerhet så koordinaterna inte går utanför bilden
                 x1 = max(0, x1)
                 y1 = max(0, y1)
                 x2 = min(frame.shape[1], x2)
@@ -106,14 +112,18 @@ def generate_frames():
                 if plate_img.size == 0:
                     continue
 
+                plate_signature = get_plate_signature(x1, y1, x2, y2)
+
                 reg_number = None
 
-                # Kör OCR max ungefär en gång per sekund
-                current_time = time.time()
-
-                if current_time - last_ocr_time > 1.0:
+                if plate_signature != last_plate_signature:
                     reg_number = read_plate_text(plate_img)
-                    last_ocr_time = current_time
+
+                    last_plate_signature = plate_signature
+                    last_ocr_result = reg_number
+
+                else:
+                    reg_number = last_ocr_result
 
                 cv2.rectangle(
                     frame,
@@ -147,7 +157,6 @@ def generate_frames():
                     2
                 )
 
-        # Visar fortfarande originalbilden i 1280x720 på hemsidan
         display_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
         success, buffer = cv2.imencode(".jpg", display_frame)
